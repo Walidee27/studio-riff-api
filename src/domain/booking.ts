@@ -66,3 +66,16 @@ export function assertNoOverlap(request: BookingRequest, existing: Booking[]): v
   );
   if (conflict) throw new ConflictError('La salle est déjà réservée sur ce créneau');
 }
+
+export const MAX_UPCOMING_BOOKINGS = 2;
+
+export function isUpcoming(booking: Booking, clock: Clock): boolean {
+  return booking.status === 'confirmed' && booking.start > clock.now();
+}
+
+export function assertMemberLimit(memberBookings: Booking[], clock: Clock): void {
+  const upcoming = memberBookings.filter((booking) => isUpcoming(booking, clock)).length;
+  if (upcoming >= MAX_UPCOMING_BOOKINGS) {
+    throw new ConflictError(`Un membre a au plus ${MAX_UPCOMING_BOOKINGS} réservations à venir`);
+  }
+}

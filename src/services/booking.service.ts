@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from '../db/pool.js';
 import { withTransaction } from '../db/transaction.js';
-import { assertNoOverlap, parseBookingRequest, type Booking } from '../domain/booking.js';
+import { assertMemberLimit, assertNoOverlap, parseBookingRequest, type Booking } from '../domain/booking.js';
 import type { Clock } from '../domain/clock.js';
 import { NotFoundError } from '../domain/errors.js';
 import { bookingRepository } from '../repositories/booking.repository.js';
@@ -23,8 +23,11 @@ export class BookingService {
       if (!room) throw new NotFoundError(`Salle ${roomId} introuvable`);
       const request = parseBookingRequest(roomId, body, this.clock);
 
-      const member = await memberRepository.findById(client, request.memberId);
+      const member = await memberRepository.findByIdForUpdate(client, request.memberId);
       if (!member) throw new NotFoundError(`Membre ${request.memberId} introuvable`);
+
+      const memberBookings = await bookingRepository.findByMember(client, member.id);
+      assertMemberLimit(memberBookings, this.clock);
 
       const roomBookings = await bookingRepository.findConfirmedByRoomBetween(client, roomId, request.start, request.end);
       assertNoOverlap(request, roomBookings);
