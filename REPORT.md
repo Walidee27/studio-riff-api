@@ -136,3 +136,43 @@ planning:room-1:v0:2026-11-02T00:00:00.000Z:2026-11-09T00:00:00.000Z
 - **Sauvegarde.** `pg_dump` donne une copie cohérente et restaurable (partie 3).
 
 **Taille de l'association.** Studio Riff a 4 salles et quelques dizaines de membres : quelques dizaines de réservations par semaine, quelques milliers par an. PostgreSQL répond au planning en moins d'une milliseconde, même avec 100 000 lignes et le bon index (partie 1). Le cache n'est donc pas une nécessité de performance aujourd'hui. Il est gardé volontairement simple (une clé par salle et période, invalidation par version) et **facultatif** : sans `VALKEY_URL`, ou si Valkey tombe, l'API fonctionne à l'identique. Une association de cette taille ne doit pas dépendre d'un deuxième serveur pour prendre une réservation.
+
+## 3. Sauvegarde et restauration
+
+### Scripts
+
+- [`backup.sh`](backup.sh) : `pg_dump -Fc` exécuté dans le conteneur, écrit dans `backups/<base>_<horodatage UTC>.dump` (écriture dans un fichier `.partial` puis renommage, pour ne jamais laisser une sauvegarde tronquée sous un nom valide), puis suppression des sauvegardes de plus de `RETENTION_DAYS` jours (30 par défaut).
+- [`restore.sh`](restore.sh) `[fichier.dump] [base_cible]` : crée une **nouvelle** base avec `createdb` (refuse de restaurer dans la base d'origine), restaure avec `pg_restore`, compare le nombre de lignes de chaque table des deux côtés et vérifie que la contrainte d'exclusion est bien recréée. Code de sortie non nul si un comptage diffère.
+
+### Preuve (base contenant les 100 000 réservations générées + les données de départ + 1 réservation créée à la main)
+
+```
+$ ./backup.sh
+Sauvegarde : backups/studio_riff_20261102T124322Z.dump (536K)
+
+$ ./restore.sh
+Restauration de backups/studio_riff_20261102T124322Z.dump dans la nouvelle base studio_riff_restore_20261102124323
+Durée de restauration : 3 s
+
+table                 studio_riff   studio_riff_restore_20261102124323  resultat
+rooms                           4                                    4  OK
+members                         3                                    3  OK
+bookings                   100005                               100005  OK
+schema_migrations               2                                    2  OK
+
+Contrainte bookings_no_overlap présente dans studio_riff_restore_20261102124323 : oui
+(code de sortie : 0)
+
+$ ./restore.sh backups/*.dump studio_riff
+Refus : la restauration se fait dans une nouvelle base, pas dans studio_riff
+```
+
+### RPO, RTO et rétention
+
+| | Valeur | Justification |
+|---|---|---|
+| **RPO** (perte de données maximale) | **24 h** | Une sauvegarde par nuit (`0 3 * * * /chemin/vers/backup.sh`, à 3 h UTC, quand personne ne répète). Studio Riff enregistre quelques dizaines de réservations par semaine : au pire, on perd celles d'une journée, que les membres peuvent refaire. Une sauvegarde continue (archivage WAL, réplication) coûterait un serveur et de l'administration qu'une association de bénévoles ne peut pas assurer. |
+| **RTO** (durée d'interruption maximale) | **4 h** | La restauration technique prend **3 s** pour 100 000 réservations (mesuré ci-dessus), soit bien moins pour le volume réel. Le délai est donc humain : un bénévole doit s'apercevoir de la panne et lancer `restore.sh`. Les salles sont surtout réservées en soirée : une interruption d'une demi-journée ne fait perdre aucune répétition, les membres pouvant réserver plus tard ou par téléphone. Une banque viserait quelques minutes avec une réplique prête à prendre le relais ; ici ce serait disproportionné. |
+| **Rétention** | **30 jours** (30 sauvegardes quotidiennes) | Une erreur (annulations en masse, script lancé sur la mauvaise base) peut n'être remarquée qu'au bout de quelques semaines, par exemple au bilan mensuel des salles. Une sauvegarde pèse environ 0,5 Mo même avec 100 000 réservations : 30 jours tiennent en moins de 20 Mo. Au-delà, on conserverait des données personnelles (noms de groupes, horaires) sans besoin, ce que le RGPD demande d'éviter. |
+
+À prévoir en production : copier chaque sauvegarde hors de la machine (disque externe ou stockage en ligne de l'association), sans quoi une panne du disque emporte la base et ses sauvegardes, et lancer `restore.sh` une fois par mois pour vérifier que les sauvegardes sont réellement restaurables.
