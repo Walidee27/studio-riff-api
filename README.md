@@ -33,7 +33,7 @@ npm start
 
 `npm run dev` relance l'API à chaque modification. Le port se change avec la variable `PORT`.
 
-`npm run seed` vide les tables puis réinsère les données de départ : il remet la base dans son état initial à tout moment.
+`npm run seed` est obligatoire une fois, après `npm run migrate`. Ensuite, il ne sert qu'à remettre la base dans son état initial (il vide les tables puis réinsère les données de départ), par exemple avant de rejouer la collection Postman. Les tests n'en ont pas besoin.
 
 > **Le port 5432 est déjà pris ?** (un PostgreSQL installé sur la machine) Créez un fichier `compose.override.yaml`, ignoré par git :
 >
@@ -85,7 +85,7 @@ curl -i -X DELETE http://localhost:3000/bookings/booking-1
 
 ### Postman
 
-Importez [`postman/studio-riff.postman_collection.json`](postman/studio-riff.postman_collection.json) (*Import* dans Postman). La collection contient 27 requêtes avec leurs assertions : lecture, création, règles métier et annulation. Lancez `npm run seed`, puis exécutez la collection dans l'ordre (*Run collection*). La variable `baseUrl` vaut `http://localhost:3000`.
+Importez [`postman/studio-riff.postman_collection.json`](postman/studio-riff.postman_collection.json) (*Import* dans Postman). La collection contient 27 requêtes avec leurs assertions : lecture, création, règles métier et annulation. Exécutez-la dans l'ordre (*Run collection*) sur les données de départ. La collection modifie la base (annulations, créations) : pour la rejouer entièrement, relancez d'abord `npm run seed`. La variable `baseUrl` vaut `http://localhost:3000`.
 
 En ligne de commande : `npx newman run postman/studio-riff.postman_collection.json`.
 
