@@ -9,7 +9,8 @@ Node.js, Express 5, TypeScript, PostgreSQL 17 (driver `pg`) et Valkey 8 pour le 
 ## Prérequis
 
 - Docker avec Docker Compose
-- Node.js 22 ou plus récent, et npm
+- Node.js 22.12+, 24 ou 26 (voir `.nvmrc`), et npm
+- Un shell bash pour `backup.sh` et `restore.sh` (macOS, Linux, ou WSL / Git Bash sous Windows)
 
 ## Démarrage
 
@@ -31,6 +32,8 @@ npm run seed
 npm start
 ```
 
+`http://localhost:3000/` liste les routes disponibles.
+
 `npm run dev` relance l'API à chaque modification. Le port se change avec la variable `PORT`.
 
 `npm run seed` est obligatoire une fois, après `npm run migrate`. Ensuite, il ne sert qu'à remettre la base dans son état initial (il vide les tables puis réinsère les données de départ), par exemple avant de rejouer la collection Postman. Les tests n'en ont pas besoin.
@@ -45,6 +48,18 @@ npm start
 > ```
 >
 > puis remplacez `5432` par `5433` dans `DATABASE_URL` du fichier `.env`.
+
+## Horloge de l'API (`FIXED_NOW`)
+
+Les règles qui dépendent de l'heure (réservations à venir, annulation tardive, refus d'un créneau passé) lisent une horloge injectée. Le `.env.example` contient :
+
+```
+FIXED_NOW=2026-11-02T09:00:00Z
+```
+
+L'API se comporte donc comme le **lundi 2 novembre 2026 à 9 h UTC**, la date du scénario du sujet, quelle que soit la date réelle : `member-1` a déjà 2 réservations à venir, `booking-3` commence dans moins de 24 h, et l'exemple du sujet (`member-3`, 4 novembre 14 h - 16 h) est accepté. L'heure utilisée s'affiche au démarrage de l'API.
+
+Pour utiliser l'heure système (fonctionnement réel), videz la valeur (`FIXED_NOW=`) et relancez l'API. Les tests automatisés ont leur propre horloge fixe et ne dépendent pas de cette variable.
 
 ## Tests
 
@@ -88,8 +103,6 @@ curl -i -X DELETE http://localhost:3000/bookings/booking-1
 Importez [`postman/studio-riff.postman_collection.json`](postman/studio-riff.postman_collection.json) (*Import* dans Postman). La collection contient 27 requêtes avec leurs assertions : lecture, création, règles métier et annulation. Exécutez-la dans l'ordre (*Run collection*) sur les données de départ. La collection modifie la base (annulations, créations) : pour la rejouer entièrement, relancez d'abord `npm run seed`. La variable `baseUrl` vaut `http://localhost:3000`.
 
 En ligne de commande : `npx newman run postman/studio-riff.postman_collection.json`.
-
-L'API utilise l'heure réelle : une réservation dont le début est déjà passé est refusée (400).
 
 ## Mesure de la requête de planning
 
