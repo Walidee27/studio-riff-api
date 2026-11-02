@@ -1,6 +1,6 @@
 import type { Clock } from './clock.js';
-import { ValidationError } from './errors.js';
-import { HOUR_MS, parseInstant, startOfUtcDay } from './time.js';
+import { ConflictError, ValidationError } from './errors.js';
+import { HOUR_MS, intervalsOverlap, parseInstant, startOfUtcDay } from './time.js';
 
 export type BookingStatus = 'confirmed' | 'cancelled' | 'late_cancelled';
 
@@ -55,4 +55,14 @@ export function parseBookingRequest(roomId: string, body: unknown, clock: Clock)
   const request = { roomId, memberId, start: parseInstant(start, 'start'), end: parseInstant(end, 'end') };
   assertValidSlot(request.start, request.end, clock);
   return request;
+}
+
+export function assertNoOverlap(request: BookingRequest, existing: Booking[]): void {
+  const conflict = existing.find(
+    (booking) =>
+      booking.roomId === request.roomId &&
+      booking.status === 'confirmed' &&
+      intervalsOverlap(booking.start, booking.end, request.start, request.end),
+  );
+  if (conflict) throw new ConflictError('La salle est déjà réservée sur ce créneau');
 }

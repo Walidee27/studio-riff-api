@@ -1,5 +1,6 @@
 import type { Queryable } from '../db/pool.js';
 import type { Booking, BookingStatus } from '../domain/booking.js';
+import { ConflictError } from '../domain/errors.js';
 
 interface BookingRow {
   id: string;
@@ -9,6 +10,8 @@ interface BookingRow {
   end_at: Date;
   status: BookingStatus;
 }
+
+const EXCLUSION_VIOLATION = '23P01';
 
 const columns = 'id, room_id, member_id, start_at, end_at, status';
 
@@ -48,9 +51,16 @@ export const bookingRepository = {
   },
 
   async insert(db: Queryable, booking: Booking): Promise<void> {
-    await db.query(
-      `INSERT INTO bookings (id, room_id, member_id, start_at, end_at, status) VALUES ($1, $2, $3, $4, $5, $6)`,
-      [booking.id, booking.roomId, booking.memberId, booking.start, booking.end, booking.status],
-    );
+    try {
+      await db.query(
+        `INSERT INTO bookings (id, room_id, member_id, start_at, end_at, status) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [booking.id, booking.roomId, booking.memberId, booking.start, booking.end, booking.status],
+      );
+    } catch (error) {
+      if ((error as { code?: string }).code === EXCLUSION_VIOLATION) {
+        throw new ConflictError('La salle est déjà réservée sur ce créneau');
+      }
+      throw error;
+    }
   },
 };
