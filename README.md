@@ -83,6 +83,12 @@ curl "http://localhost:3000/rooms/room-1/bookings?from=2026-11-02T00:00:00Z&to=2
 curl -i -X DELETE http://localhost:3000/bookings/booking-1
 ```
 
+### Postman
+
+Importez [`postman/studio-riff.postman_collection.json`](postman/studio-riff.postman_collection.json) (*Import* dans Postman). La collection contient 27 requêtes avec leurs assertions : lecture, création, règles métier et annulation. Lancez `npm run seed`, puis exécutez la collection dans l'ordre (*Run collection*). La variable `baseUrl` vaut `http://localhost:3000`.
+
+En ligne de commande : `npx newman run postman/studio-riff.postman_collection.json`.
+
 L'API utilise l'heure réelle : une réservation dont le début est déjà passé est refusée (400).
 
 ## Mesure de la requête de planning
