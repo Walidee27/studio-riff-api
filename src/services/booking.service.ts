@@ -4,6 +4,7 @@ import { withTransaction } from '../db/transaction.js';
 import { assertMemberLimit, cancelBooking, assertNoOverlap, parseBookingRequest, type Booking } from '../domain/booking.js';
 import type { Clock } from '../domain/clock.js';
 import { NotFoundError } from '../domain/errors.js';
+import { assertRoomAvailable } from '../domain/room.js';
 import { bookingRepository } from '../repositories/booking.repository.js';
 import { memberRepository } from '../repositories/member.repository.js';
 import { roomRepository } from '../repositories/room.repository.js';
@@ -22,6 +23,7 @@ export class BookingService {
       const room = await roomRepository.findById(client, roomId);
       if (!room) throw new NotFoundError(`Salle ${roomId} introuvable`);
       const request = parseBookingRequest(roomId, body, this.clock);
+      assertRoomAvailable(room, request.start, request.end);
 
       const member = await memberRepository.findByIdForUpdate(client, request.memberId);
       if (!member) throw new NotFoundError(`Membre ${request.memberId} introuvable`);
