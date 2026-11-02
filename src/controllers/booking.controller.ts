@@ -12,5 +12,10 @@ export function bookingController(bookings: BookingService) {
       const booking = await bookings.createBooking(req.params.id, req.body);
       res.status(201).location(`/bookings/${booking.id}`).json(bookingView(booking));
     },
+
+    async cancel(req: Request<{ id: string }>, res: Response) {
+      await bookings.cancelBooking(req.params.id);
+      res.status(204).end();
+    },
   };
 }

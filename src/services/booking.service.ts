@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Pool } from '../db/pool.js';
 import { withTransaction } from '../db/transaction.js';
-import { assertMemberLimit, assertNoOverlap, parseBookingRequest, type Booking } from '../domain/booking.js';
+import { assertMemberLimit, cancelBooking, assertNoOverlap, parseBookingRequest, type Booking } from '../domain/booking.js';
 import type { Clock } from '../domain/clock.js';
 import { NotFoundError } from '../domain/errors.js';
 import { bookingRepository } from '../repositories/booking.repository.js';
@@ -35,6 +35,16 @@ export class BookingService {
       const booking: Booking = { id: `booking-${randomUUID()}`, ...request, status: 'confirmed' };
       await bookingRepository.insert(client, booking);
       return booking;
+    });
+  }
+
+  async cancelBooking(id: string): Promise<Booking> {
+    return withTransaction(this.pool, async (client) => {
+      const booking = await bookingRepository.findByIdForUpdate(client, id);
+      if (!booking) throw new NotFoundError(`Réservation ${id} introuvable`);
+      const cancelled = cancelBooking(booking, this.clock);
+      await bookingRepository.updateStatus(client, id, cancelled.status, this.clock.now());
+      return cancelled;
     });
   }
 }

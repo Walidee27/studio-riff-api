@@ -32,6 +32,11 @@ export const bookingRepository = {
     return rows[0] ? toBooking(rows[0]) : null;
   },
 
+  async findByIdForUpdate(db: Queryable, id: string): Promise<Booking | null> {
+    const { rows } = await db.query<BookingRow>(`SELECT ${columns} FROM bookings WHERE id = $1 FOR UPDATE`, [id]);
+    return rows[0] ? toBooking(rows[0]) : null;
+  },
+
   async findByMember(db: Queryable, memberId: string): Promise<Booking[]> {
     const { rows } = await db.query<BookingRow>(
       `SELECT ${columns} FROM bookings WHERE member_id = $1 ORDER BY start_at`,
@@ -62,5 +67,9 @@ export const bookingRepository = {
       }
       throw error;
     }
+  },
+
+  async updateStatus(db: Queryable, id: string, status: BookingStatus, at: Date): Promise<void> {
+    await db.query('UPDATE bookings SET status = $2, cancelled_at = $3 WHERE id = $1', [id, status, at]);
   },
 };

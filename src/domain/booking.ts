@@ -79,3 +79,13 @@ export function assertMemberLimit(memberBookings: Booking[], clock: Clock): void
     throw new ConflictError(`Un membre a au plus ${MAX_UPCOMING_BOOKINGS} réservations à venir`);
   }
 }
+
+export const LATE_CANCELLATION_HOURS = 24;
+
+export function cancelBooking(booking: Booking, clock: Clock): Booking {
+  if (booking.status !== 'confirmed') throw new ConflictError('Cette réservation est déjà annulée');
+  const now = clock.now();
+  if (booking.start <= now) throw new ConflictError('Une réservation commencée ne peut plus être annulée');
+  const isLate = booking.start.getTime() - now.getTime() < LATE_CANCELLATION_HOURS * HOUR_MS;
+  return { ...booking, status: isLate ? 'late_cancelled' : 'cancelled' };
+}

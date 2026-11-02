@@ -22,6 +22,7 @@ export function createRouter(services: Services): Router {
   router.get('/rooms/:id/bookings', rooms.planning);
   router.post('/rooms/:id/bookings', bookings.create);
   router.get('/bookings/:id', bookings.show);
+  router.delete('/bookings/:id', bookings.cancel);
   router.get('/members/:id/bookings', members.bookings);
 
   return router;
