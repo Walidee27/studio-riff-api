@@ -71,3 +71,68 @@ Sans index, PostgreSQL lit les 100 004 lignes pour en garder 91. Avec l'index co
 ```
 
 Cette condition est utilisée par `bookingRepository.findConfirmedByRoomBetween`. L'écart ne se voit pas avec 4 réservations, mais il reste constant quand l'historique grossit, alors que la version sans borne basse se dégrade avec le nombre de semaines passées.
+
+## 2. Cache Valkey du planning
+
+### Clés et durée de vie
+
+| Clé | Contenu | Durée de vie |
+|---|---|---|
+| `planning:{roomId}:version` | Compteur entier, incrémenté (`INCR`) à chaque réservation ou annulation de la salle | aucune (4 clés au total) |
+| `planning:{roomId}:v{version}:{from}:{to}` | JSON du planning de la salle sur la période demandée | 300 s (`SET … EX 300`) |
+
+- **Pourquoi ces clés.** L'accès est toujours « une salle, une période » : la clé reprend exactement les paramètres de `GET /rooms/:id/bookings`. La version par salle permet d'invalider d'un coup toutes les périodes d'une salle sans `KEYS` ni `SCAN` : les anciennes entrées ne sont plus jamais lues et expirent d'elles-mêmes. Une réservation de `room-1` ne vide pas le cache des trois autres salles.
+- **Pourquoi 300 s.** La fraîcheur ne dépend pas du TTL : chaque écriture change la version, donc le planning est à jour immédiatement. Le TTL ne sert qu'à borner la mémoire occupée par les périodes consultées une fois (plannings d'anciennes semaines). Cinq minutes couvrent les consultations répétées d'un membre qui organise sa semaine.
+- **Pas de course entre lecture et invalidation.** La version est lue une seule fois avant d'interroger PostgreSQL ; si une réservation est créée pendant la lecture, le résultat est rangé sous l'ancienne version, qui n'est plus lue.
+- **Valkey indisponible.** Client configuré avec `disableOfflineQueue` et un `connectTimeout` de 500 ms ; chaque appel au cache est protégé et renvoie « absent » en cas d'erreur, la requête part alors vers PostgreSQL. Comme une invalidation peut être perdue pendant une panne, le cache vide ses clés `planning:*` à chaque (re)connexion.
+
+Tests automatisés : [`tests/http/cache.test.ts`](tests/http/cache.test.ts) (Valkey réel) et [`tests/http/cache-unavailable.test.ts`](tests/http/cache-unavailable.test.ts) (Valkey injoignable).
+
+### Preuve manuelle (API lancée, Valkey arrêté puis relancé)
+
+```
+$ curl "$PLANNING"   # 1re lecture, mise en cache
+[{"id":"booking-1","roomId":"room-1","memberId":"member-1","start":"2026-11-03T18:00:00Z","end":"2026-11-03T20:00:00Z","status":"confirmed"}]
+$ valkey-cli KEYS "planning:*"
+planning:room-1:v0:2026-11-02T00:00:00.000Z:2026-11-09T00:00:00.000Z
+$ valkey-cli TTL <clé>
+300
+$ curl -X POST /rooms/room-1/bookings (member-3, 4 nov 14h-16h)
+HTTP/1.1 201 Created
+Location: /bookings/booking-ed404285-291e-4b98-a1b8-7301955a6dd5
+$ curl "$PLANNING"   # immédiatement à jour
+[{"id":"booking-1","roomId":"room-1","memberId":"member-1","start":"2026-11-03T18:00:00Z","end":"2026-11-03T20:00:00Z","status":"confirmed"},{"id":"booking-ed404285-291e-4b98-a1b8-7301955a6dd5","roomId":"room-1","memberId":"member-3","start":"2026-11-04T14:00:00Z","end":"2026-11-04T16:00:00Z","status":"confirmed"}]
+$ valkey-cli GET planning:room-1:version
+1
+$ docker compose stop valkey
+ Container socleback-endepreuve-valkey-1 Stopped 
+$ curl -w "%{http_code}" "$PLANNING"   # Valkey arrêté
+[{"id":"booking-1","roomId":"room-1","memberId":"member-1","start":"2026-11-03T18:00:00Z","end":"2026-11-03T20:00:00Z","status":"confirmed"},{"id":"booking-ed404285-291e-4b98-a1b8-7301955a6dd5","roomId":"room-1","memberId":"member-3","start":"2026-11-04T14:00:00Z","end":"2026-11-04T16:00:00Z","status":"confirmed"}] -> HTTP 200
+$ curl -X DELETE /bookings/booking-1   # Valkey arrêté
+HTTP 204
+$ curl "$PLANNING"
+[{"id":"booking-ed404285-291e-4b98-a1b8-7301955a6dd5","roomId":"room-1","memberId":"member-3","start":"2026-11-04T14:00:00Z","end":"2026-11-04T16:00:00Z","status":"confirmed"}] -> HTTP 200
+$ docker compose start valkey
+ Container socleback-endepreuve-valkey-1 Started 
+$ curl "$PLANNING"   # Valkey revenu : cache vidé à la reconnexion, pas de planning périmé
+[{"id":"booking-ed404285-291e-4b98-a1b8-7301955a6dd5","roomId":"room-1","memberId":"member-3","start":"2026-11-04T14:00:00Z","end":"2026-11-04T16:00:00Z","status":"confirmed"}]
+$ valkey-cli KEYS "planning:*"
+planning:room-1:v0:2026-11-02T00:00:00.000Z:2026-11-09T00:00:00.000Z
+```
+
+### Quelles données dans Valkey, lesquelles dans PostgreSQL ?
+
+| Donnée | Où | Raison |
+|---|---|---|
+| Salles, membres, réservations, historique des annulations | **PostgreSQL** | Source de vérité. Il faut des transactions, des clés étrangères, la contrainte d'exclusion anti-chevauchement, le verrou sur le membre, des requêtes par période et des sauvegardes cohérentes. |
+| Planning d'une salle sur une période (réponse calculée) | **Valkey** | Donnée dérivée, recalculable à tout moment depuis PostgreSQL ; sa perte ne coûte qu'une requête. C'est la ressource la plus lue. |
+| Candidats naturels si l'API grandit | **Valkey** | Limitation de débit par membre (`INCR` + `EXPIRE`), clés d'idempotence des `POST` (TTL de quelques minutes), sessions. Toutes sont temporaires et tolèrent une perte. |
+
+**Les réservations pourraient-elles être stockées dans Valkey ?** Non, pas comme source de vérité :
+
+- **Intégrité.** Valkey n'a ni contrainte d'exclusion ni clé étrangère. Empêcher deux réservations qui se chevauchent demanderait des scripts Lua ou des `WATCH`/`MULTI` écrits à la main, c'est-à-dire réécrire ce que PostgreSQL garantit déjà, avec un risque de bug sur la règle la plus importante du sujet (le double booking qui a motivé le projet).
+- **Durabilité.** Dans ce `compose.yaml`, Valkey n'a pas de volume : un redémarrage efface tout (visible ci-dessus, la seule clé restante est celle recréée après redémarrage). Même avec AOF, la persistance est moins stricte qu'un commit PostgreSQL.
+- **Requêtes.** « Les réservations d'un membre », « le planning d'une salle sur une semaine », le comptage des réservations à venir : tout cela est naturel en SQL, coûteux à maintenir en index secondaires dans un magasin clé-valeur.
+- **Sauvegarde.** `pg_dump` donne une copie cohérente et restaurable (partie 3).
+
+**Taille de l'association.** Studio Riff a 4 salles et quelques dizaines de membres : quelques dizaines de réservations par semaine, quelques milliers par an. PostgreSQL répond au planning en moins d'une milliseconde, même avec 100 000 lignes et le bon index (partie 1). Le cache n'est donc pas une nécessité de performance aujourd'hui. Il est gardé volontairement simple (une clé par salle et période, invalidation par version) et **facultatif** : sans `VALKEY_URL`, ou si Valkey tombe, l'API fonctionne à l'identique. Une association de cette taille ne doit pas dépendre d'un deuxième serveur pour prendre une réservation.
