@@ -46,4 +46,11 @@ export const bookingRepository = {
     );
     return rows.map(toBooking);
   },
+
+  async insert(db: Queryable, booking: Booking): Promise<void> {
+    await db.query(
+      `INSERT INTO bookings (id, room_id, member_id, start_at, end_at, status) VALUES ($1, $2, $3, $4, $5, $6)`,
+      [booking.id, booking.roomId, booking.memberId, booking.start, booking.end, booking.status],
+    );
+  },
 };

@@ -1,3 +1,7 @@
+import type { Clock } from './clock.js';
+import { ValidationError } from './errors.js';
+import { HOUR_MS, parseInstant, startOfUtcDay } from './time.js';
+
 export type BookingStatus = 'confirmed' | 'cancelled' | 'late_cancelled';
 
 export interface Booking {
@@ -7,4 +11,48 @@ export interface Booking {
   start: Date;
   end: Date;
   status: BookingStatus;
+}
+
+export interface BookingRequest {
+  roomId: string;
+  memberId: string;
+  start: Date;
+  end: Date;
+}
+
+export const OPENING_HOUR = 10;
+export const CLOSING_HOUR = 23;
+export const MIN_DURATION_HOURS = 1;
+export const MAX_DURATION_HOURS = 4;
+
+function isFullHour(date: Date): boolean {
+  return date.getUTCMinutes() === 0 && date.getUTCSeconds() === 0 && date.getUTCMilliseconds() === 0;
+}
+
+export function assertValidSlot(start: Date, end: Date, clock: Clock): void {
+  if (!isFullHour(start) || !isFullHour(end)) {
+    throw new ValidationError('Un créneau commence et finit à une heure pleine');
+  }
+  const durationHours = (end.getTime() - start.getTime()) / HOUR_MS;
+  if (durationHours < MIN_DURATION_HOURS || durationHours > MAX_DURATION_HOURS) {
+    throw new ValidationError(`Un créneau dure de ${MIN_DURATION_HOURS} h à ${MAX_DURATION_HOURS} h`);
+  }
+  const closing = startOfUtcDay(start).getTime() + CLOSING_HOUR * HOUR_MS;
+  if (start.getUTCHours() < OPENING_HOUR || end.getTime() > closing) {
+    throw new ValidationError(`Un créneau se tient entre ${OPENING_HOUR} h et ${CLOSING_HOUR} h UTC`);
+  }
+  if (start <= clock.now()) {
+    throw new ValidationError('Un créneau ne peut pas commencer dans le passé');
+  }
+}
+
+export function parseBookingRequest(roomId: string, body: unknown, clock: Clock): BookingRequest {
+  if (typeof body !== 'object' || body === null) throw new ValidationError('Corps de requête attendu');
+  const { memberId, start, end } = body as Record<string, unknown>;
+  if (typeof memberId !== 'string' || memberId.trim() === '') {
+    throw new ValidationError('memberId est obligatoire');
+  }
+  const request = { roomId, memberId, start: parseInstant(start, 'start'), end: parseInstant(end, 'end') };
+  assertValidSlot(request.start, request.end, clock);
+  return request;
 }
