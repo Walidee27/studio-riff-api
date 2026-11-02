@@ -48,7 +48,8 @@ export const bookingRepository = {
   async findConfirmedByRoomBetween(db: Queryable, roomId: string, from: Date, to: Date): Promise<Booking[]> {
     const { rows } = await db.query<BookingRow>(
       `SELECT ${columns} FROM bookings
-       WHERE room_id = $1 AND status = 'confirmed' AND start_at < $3 AND end_at > $2
+       WHERE room_id = $1 AND status = 'confirmed'
+         AND start_at < $3 AND start_at > $2::timestamptz - interval '4 hours' AND end_at > $2
        ORDER BY start_at`,
       [roomId, from, to],
     );
