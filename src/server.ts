@@ -3,9 +3,10 @@ import { noPlanningCache } from './cache/planning.cache.js';
 import { createValkeyClient, ValkeyPlanningCache } from './cache/valkey-planning.cache.js';
 import { config } from './config.js';
 import { createPool } from './db/pool.js';
-import { systemClock } from './domain/clock.js';
+import { FixedClock, systemClock } from './domain/clock.js';
 
 const pool = createPool(config.databaseUrl);
+const clock = config.fixedNow ? new FixedClock(config.fixedNow) : systemClock;
 
 let cache = noPlanningCache;
 if (config.valkeyUrl) {
@@ -14,8 +15,9 @@ if (config.valkeyUrl) {
   cache = new ValkeyPlanningCache(client);
 }
 
-const app = createApp({ pool, clock: systemClock, cache });
+const app = createApp({ pool, clock, cache });
 
 app.listen(config.port, () => {
   console.log(`Studio Riff API sur http://localhost:${config.port}`);
+  console.log(config.fixedNow ? `Horloge fixée au ${config.fixedNow} (FIXED_NOW)` : 'Horloge : heure système');
 });

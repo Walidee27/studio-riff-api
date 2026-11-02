@@ -11,6 +11,8 @@
 | Une salle en maintenance refuse toute réservation qui empiète sur la maintenance | Domaine : `assertRoomAvailable(room, start, end)` dans `src/domain/room.ts`. Base : colonnes `maintenance_start` / `maintenance_end` sur `rooms`. | Même logique de chevauchement `[start, end)` que pour les réservations, données portées par la salle. | 409 |
 | Toutes les heures en UTC | Colonnes `timestamptz`, sérialisation ISO 8601 avec `Z` dans la vue. | — | — |
 
+Horloge : toute règle qui dépend de l'heure reçoit un `Clock` (`src/domain/clock.ts`). Les tests injectent `FixedClock('2026-11-02T09:00:00Z')`. Au lancement, l'API utilise `FixedClock(FIXED_NOW)` si la variable est définie, sinon l'heure système. `.env.example` fixe `FIXED_NOW` au lundi 2 novembre 2026, 9 h : les données de départ et les exemples du sujet (une 3ᵉ réservation de `member-1` refusée, `booking-3` annulée en `late_cancelled`, une réservation le 4 novembre acceptée) restent vérifiables à la main quelle que soit la date réelle. En production, la variable est vide.
+
 Autres choix de contrat : un `memberId` inconnu renvoie 404 ; un corps JSON invalide ou des dates illisibles renvoient 400 ; le planning ne liste que les réservations `confirmed`.
 
 ## 2. Schéma des couches
